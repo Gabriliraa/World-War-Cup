@@ -106,6 +106,11 @@ const GOOD_EVENTS=[
 ];
 
 let STATE={players:[],current:0,turn:1,owner:{},effects:{},log:[],zoom:1,panX:0,panY:0};
+// O lock pertence à campanha inteira; nunca deve ser criado implicitamente.
+let battleLocked=false;
+// A versão anterior já usava 25M como fallback; a tabela torna essa regra explícita.
+const COUNTRY_REWARD=Object.fromEntries(COUNTRIES.map(country=>[country[0],25]));
+const EVENTS={bad:BAD_EVENTS,good:GOOD_EVENTS};
 
 const $=id=>document.getElementById(id);
 function showScreen(id){document.querySelectorAll(".screen").forEach(x=>x.classList.remove("active"));$(id).classList.add("active")}
@@ -482,28 +487,31 @@ function v4AutoSub(p,write){
 function v4FormationValid(p){const c=v4Counts(p);if(p.formation==="CUSTOM")return c.G===1&&c.G+c.DEF+c.MID+c.ATT===11;const f=FORMATIONS_V4[p.formation];return !!f&&c.G===f.G&&c.DEF===f.DEF&&c.MID===f.MID&&c.ATT===f.ATT}
 function v4ApplyFormation(p,form,custom){
   const target=form==="CUSTOM"?custom:FORMATIONS_V4[form];if(!target)return false;
-  p.roster.forEach(x=>{if(x.starter&&!x.injured&&!x.red)x.starter=false});
+  const required=Object.entries(target).filter(([pos])=>["G","DEF","MID","ATT"].includes(pos));
   const used=new Set();
-  for(const [pos,n] of Object.entries(target)){
+  const lineup=[];
+  for(const [pos,n] of required){
     for(let i=0;i<n;i++){
       if(pos==="G"){
-        const x=p.roster.find(y=>!used.has(y.id)&&!y.injured&&!y.red&&y.nativePos==="G");if(!x)return false;x.pos="G";x.starter=true;used.add(x.id);continue;
+        const x=p.roster.find(y=>!used.has(y.id)&&!y.injured&&!y.red&&y.nativePos==="G");if(!x)return false;lineup.push([x,"G"]);used.add(x.id);continue;
       }
       let x=p.roster.find(y=>!used.has(y.id)&&!y.injured&&!y.red&&y.nativePos===pos);
       if(!x && pos==="MID")x=p.roster.find(y=>!used.has(y.id)&&!y.injured&&!y.red&&y.nativePos==="ATT");
       if(!x && pos==="ATT")x=p.roster.find(y=>!used.has(y.id)&&!y.injured&&!y.red&&y.nativePos==="MID");
-      if(!x)return false;x.pos=pos;x.starter=true;used.add(x.id);
+      if(!x)return false;lineup.push([x,pos]);used.add(x.id);
     }
   }
+  p.roster.forEach(x=>{if(!x.injured&&!x.red)x.starter=false});
+  lineup.forEach(([x,pos])=>{x.pos=pos;x.starter=true});
   p.formation=form;p.customFormation=custom||null;return true;
 }
 function v4EnsureTactic(p,write){
   v4AutoSub(p,write);if(v4FormationValid(p))return true;
-  const desired=FORMATIONS_V4[p.formation];if(p.formation==="CUSTOM")return true;
+  if(p.formation==="CUSTOM")return false;
   return v4ApplyFormation(p,p.formation,p.customFormation);
 }
 function v4Strength(p,side="normal"){
-  v4AutoSub(p,null);const a=p.roster.filter(x=>x.starter&&!x.injured&&!x.red),c=v4Counts(p);
+  const a=p.roster.filter(x=>x.starter&&!x.injured&&!x.red),c=v4Counts(p);
   let v=a.reduce((s,x)=>s+x.ovr,0)/Math.max(1,a.length);v+=v4Effect(p,"overall");v+=v4Effect(p,"permanent");
   if(side==="attack")v+=v4Effect(p,"attack");if(side==="defense")v+=v4Effect(p,"defense");
   if(c.G<1)v-=18;if(c.DEF>=5)v+=2;if(c.DEF<=2)v-=5;if(c.ATT>=4)v+=2;if(c.MID>=4)v+=1;
@@ -514,7 +522,7 @@ function v4Strength(p,side="normal"){
 function startGame(){
   const selects=[...document.querySelectorAll(".trainer-country")],names=[...document.querySelectorAll(".trainer-name")];
   if(new Set(selects.map(x=>x.value)).size!==selects.length){toast("Escolha países diferentes.");return}
-  STATE={version:4,players:[],current:0,turn:1,owner:{},effects:{},log:[],zoom:1,panX:0,panY:0,scorers:{},lastEvent:null,botRosters:{},legendEventUsed:false,market:MARKET_V4.map(x=>({...x})),marketSeen:{},trades:[],pendingTrade:null,roundGoalMoney:0};
+  battleLocked=false;STATE={version:4,players:[],current:0,turn:1,owner:{},effects:{},log:[],zoom:1,panX:0,panY:0,scorers:{},lastEvent:null,botRosters:{},legendEventUsed:false,market:MARKET_V4.map(x=>({...x})),marketSeen:{},trades:[],pendingTrade:null,roundGoalMoney:0};
   NAMES.forEach(c=>STATE.owner[c]=null);
   selects.forEach((s,i)=>{const p={id:i,name:names[i].value.trim()||`Jogador ${i+1}`,country:s.value,roster:v4CreateRoster(s.value),territories:[s.value],eliminated:false,defeatedBy:[],money:60,formation:"433",customFormation:null};STATE.players.push(p);STATE.owner[p.country]=p.id});
   addLog("🏁 World War Cup começou.");showScreen("game");renderGame();
@@ -536,28 +544,58 @@ function renderMap(){
  NAMES.forEach(c=>{const info=COUNTRIES.find(x=>x[0]===c),o=STATE.owner[c],[x,y]=MAP_POS[c],valid=canAttack(current(),c),fill=o===null?"#4e606b":COLORS[o%COLORS.length];svg+=`<g class="node ${valid?"valid":""}" data-country="${c}" transform="translate(${x} ${y})"><circle r="${valid?25:21}" fill="${fill}" stroke="${valid?"#fff":"#dce6eb"}" stroke-width="${valid?2:1}"/><text class="flag" y="4">${info[1]}</text><text class="country-name" y="34">${c}</text><text class="ovr" y="46">OVR ${baseOVR(c)}</text></g>`});svg+=`</g><g class="zoom-controls"><rect x="890" y="15" width="42" height="36" rx="7" fill="#172936"/><text x="911" y="40" fill="white" text-anchor="middle" font-size="22">+</text><rect x="938" y="15" width="42" height="36" rx="7" fill="#172936"/><text x="959" y="40" fill="white" text-anchor="middle" font-size="22">−</text><rect x="890" y="57" width="90" height="29" rx="7" fill="#172936"/><text x="935" y="76" fill="white" text-anchor="middle" font-size="10">RESET</text></g></svg>`;
  document.getElementById("map").innerHTML=svg;document.querySelectorAll(".node").forEach(n=>n.onclick=()=>{const c=n.dataset.country;if(!battleLocked&&canAttack(current(),c))prepareAttack(c)});bindMapControls();
 }
-function bindMapControls(){const m=document.getElementById("map"),z=m.querySelector(".zoom-controls"),r=z.querySelectorAll("rect");r[0].onclick=()=>{STATE.zoom=Math.min(3,STATE.zoom+.15);renderMap()};r[1].onclick=()=>{STATE.zoom=Math.max(.65,STATE.zoom-.15);renderMap()};r[2].onclick=()=>{STATE.zoom=1;STATE.panX=STATE.panY=0;renderMap()};let dragging=false,lx=0,ly=0;m.onpointerdown=e=>{if(e.target.closest(".node,.zoom-controls"))return;dragging=true;lx=e.clientX;ly=e.clientY;m.setPointerCapture?.(e.pointerId)};m.onpointermove=e=>{if(!dragging)return;STATE.panX+=(e.clientX-lx)/m.clientWidth*1000;STATE.panY+=(e.clientY-ly)/m.clientHeight*650;lx=e.clientX;ly=e.clientY;renderMap()};m.onpointerup=()=>dragging=false;m.onpointercancel=()=>dragging=false;m.onwheel=e=>{e.preventDefault();STATE.zoom=Math.max(.65,Math.min(3,STATE.zoom+(e.deltaY<0?.12:-.12)));renderMap()};}
+function bindMapControls(){
+ const m=document.getElementById("map"),z=m.querySelector(".zoom-controls"),r=z.querySelectorAll("rect");
+ r[0].onclick=()=>{STATE.zoom=Math.min(3,STATE.zoom+.15);renderMap()};r[1].onclick=()=>{STATE.zoom=Math.max(.65,STATE.zoom-.15);renderMap()};r[2].onclick=()=>{STATE.zoom=1;STATE.panX=STATE.panY=0;renderMap()};
+ let dragging=false,lx=0,ly=0;
+ m.onpointerdown=e=>{if(e.target.closest(".node,.zoom-controls"))return;dragging=true;lx=e.clientX;ly=e.clientY;m.setPointerCapture?.(e.pointerId)};
+ m.onpointermove=e=>{if(!dragging)return;STATE.panX+=(e.clientX-lx)/m.clientWidth*1000;STATE.panY+=(e.clientY-ly)/m.clientHeight*650;lx=e.clientX;ly=e.clientY;const world=m.querySelector("svg > g");if(world)world.setAttribute("transform",`translate(${STATE.panX} ${STATE.panY}) scale(${STATE.zoom})`)};
+ m.onpointerup=e=>{dragging=false;m.releasePointerCapture?.(e.pointerId)};m.onpointercancel=()=>dragging=false;
+ m.onwheel=e=>{e.preventDefault();STATE.zoom=Math.max(.65,Math.min(3,STATE.zoom+(e.deltaY<0?.12:-.12)));renderMap()};
+}
 function baseOVR(c){return TEAM_BASE_V4[c]||75}
 function prepareAttack(target){const p=current(),o=STATE.owner[target],d=o===null?{id:-1,name:"BOT",country:target,roster:v4GetBot(target),formation:"433",defeatedBy:[]}:STATE.players[o];document.getElementById("modalContent").innerHTML=`<h2>⚔ ${p.country} × ${d.country}</h2><div class="event-box"><p><b>ATACANTE</b></p><h2>${p.country}</h2><p>OVR: <b>${v4Strength(p,"attack")}</b> • ${FORMATIONS_V4[p.formation]?.label||p.formation}</p><p><b>DEFENSOR</b></p><h2>${d.country}</h2><p>OVR: <b>${o===null?v4Strength(d):v4Strength(d,"defense")}</b></p><p class="muted">⚠️ Depois de começar, o X não cancela a partida.</p></div><button id="beginBattle" class="primary wide">⚽ COMEÇAR PARTIDA</button>`;showModal();document.getElementById("beginBattle").onclick=()=>simulateMatchV4(target)}
 function weightedScorerV4(t,opponentCountry){let a=eligiblePlayers(t).filter(x=>x.nativePos!=="G");if(!a.length)return null;const bestSuppressed=v4Effect(t,"cancelBest")>0&&t===current();const max=Math.max(...a.map(x=>x.ovr));const weights=a.map(x=>{let w=x.pos==="ATT"?3.5:x.pos==="MID"?2.1:.25;w*=Math.max(.2,x.ovr/80);if(x.ovr===max&&bestSuppressed)w*=.05;if(opponentCountry&&x.source===opponentCountry)w*=1+v4Effect(t,"exBoost")/100;return w});let total=weights.reduce((s,x)=>s+x,0),r=Math.random()*total;for(let i=0;i<a.length;i++){r-=weights[i];if(r<=0)return a[i]}return a[a.length-1]}
 function registerGoalV4(p,opponent){const x=weightedScorerV4(p,opponent);if(!x)return null;STATE.scorers[x.name]=(STATE.scorers[x.name]||0)+1;x.goals=(x.goals||0)+1;return x}
-function goalProbV4(att,def,m){const ac=v4Counts(att),dc=v4Counts(def);let chance=.025+ac.ATT*.027+ac.MID*.012+((effectiveStrengthForV4(att,"attack")-effectiveStrengthForV4(def,"defense"))/900);if(ac.ATT<2)chance-=.018;if(ac.MID<2)chance-=.01;if(dc.DEF>=5)chance-=.035;if(dc.DEF>=6)chance-=.015;if(dc.G<1)chance+=.12;if(m>=76)chance+=v4Effect(att,"lateBoost")/100;if(att.formation==="353")chance+=.008;if(att.formation==="442")chance-=.004;return Math.max(.008,Math.min(.20,chance))}
+function goalProbV4(att,def,m){const ac=v4Counts(att),dc=v4Counts(def);let chance=.025+ac.ATT*.027+ac.MID*.012+((effectiveStrengthForV4(att,"attack")-effectiveStrengthForV4(def,"defense"))/900);chance+=v4Effect(att,"goalChance");chance-=v4Effect(def,"saveBoost");if(ac.ATT<2)chance-=.018;if(ac.MID<2)chance-=.01;if(dc.DEF>=5)chance-=.035;if(dc.DEF>=6)chance-=.015;if(dc.G<1)chance+=.12;if(m>=76)chance+=v4Effect(att,"lateBoost")/100;if(att.formation==="353")chance+=.008;if(att.formation==="442")chance-=.004;return Math.max(.008,Math.min(.20,chance))}
 function effectiveStrengthForV4(p,side){return v4Strength(p,side)}
 function setBattleLock(v){battleLocked=v;document.getElementById("modal").classList.toggle("battle-locked",v)}
 async function simulateMatchV4(target){
- setBattleLock(true);const a=current(),o=STATE.owner[target],d=o===null?{id:-1,name:"BOT",country:target,roster:v4GetBot(target),formation:"433",defeatedBy:[]}:STATE.players[o];v4EnsureTactic(a,null);if(d.id>=0)v4EnsureTactic(d,null);let ga=0,gd=0;const mins=[5,10,15,20,25,30,35,42,45,55,62,70,78,84,90];let goalMoney=0;
+ const a=current(),o=STATE.owner[target],d=o===null?{id:-1,name:"BOT",country:target,roster:v4GetBot(target),formation:"433",defeatedBy:[]}:STATE.players[o];
+ if(!v4EnsureTactic(a,null)||(d.id>=0&&!v4EnsureTactic(d,null))){toast("Escalação inválida: use 11 titulares, exatamente um goleiro e uma formação válida.");return}
+ setBattleLock(true);let ga=0,gd=0;const mins=[5,10,15,20,25,30,35,42,45,55,62,70,78,84,90];let goalMoney=0;
  document.getElementById("modalContent").innerHTML=`<div class="scoreboard"><div class="team-name">${a.country}</div><div id="liveScore" class="score">0 × 0</div><div class="team-name">${d.country}</div></div><div id="timeline" class="timeline"><div class="match-event">🏟️ A partida começou. O X está bloqueado.</div></div>`;showModal();
  const write=x=>{document.getElementById("timeline").innerHTML+=`<div class="match-event">${x}</div>`;document.getElementById("timeline").scrollTop=99999;document.getElementById("liveScore").textContent=`${ga} × ${gd}`;addLog(x.replace(/<[^>]*>/g,""))};
  for(const m of mins){await new Promise(r=>setTimeout(r,m===45?900:560));if(m===45){write("<b>⏸ INTERVALO...</b>");continue}
   if(m===5&&v4Effect(a,"penalty5")){ga++;goalMoney+=2;const s=registerGoalV4(a,d.country);write(`⚽ <b>Gol de Pênalti!</b> ${s?.name||"Craque"} — ${a.country} 5'`);delete STATE.effects[a.id].penalty5;continue}
   const pA=goalProbV4(a,d,m),pD=goalProbV4(d,a,m),r=Math.random();
-  if(r<.10){const t=Math.random()<.52?a:d,x=chooseCardPlayerV4(t);if(x){if(t===a&&v4Effect(a,"yellowShield")){delete STATE.effects[a.id].yellowShield;write(`🛡️ 🟨 ${x.name} teve o amarelo anulado pelo capitão! ${m}'`)}else{x.yellow++;if(x.yellow>=2){x.red=true;x.starter=false;write(`🟨🟨🟥 <b>${x.name} EXPULSO!</b> — ${t.country} ${m}'`);v4AutoSub(t,write)}else write(`🟨 <b>${x.name}</b> — ${t.country} ${m}'`)}}}
+  if(r<.10){const t=Math.random()<.52?a:d,x=chooseCardPlayerV4(t);if(x){if(t===a&&v4Effect(a,"yellowShield")){delete STATE.effects[a.id].yellowShield;write(`🛡️ 🟨 ${x.name} teve o amarelo anulado pelo capitão! ${m}'`)}else{x.yellow++;if(x.yellow>=2){x.red=true;x.starter=false;write(`🟨🟨🟥 <b>${x.name} EXPULSO!</b> — ${t.country} seguirá com um jogador a menos.`)}else write(`🟨 <b>${x.name}</b> — ${t.country} ${m}'`)}}}
   else if(r<.10+pA){ga++;goalMoney+=2;const s=registerGoalV4(a,d.country);write(`⚽ <b>Gol!</b> ${s?.name||"Atacante"} — ${a.country} ${m}'`)}
   else if(r<.10+pA+pD){gd++;const s=registerGoalV4(d,a.country);write(`⚽ <b>Gol!</b> ${s?.name||"Atacante"} — ${d.country} ${m}'`)}
   else if(r<.47){const t=Math.random()<.5?a:d,x=weightedScorerV4(t,t===a?d.country:a.country);if(x)write(`🔥 ${m}' — ${x.name} quase marca!`);else write(`${m}' — disputa intensa.`)}else write(`${m}' — ${a.country} ${ga} × ${gd} ${d.country}.`)
  }
  if(ga===gd){write(`<b>⏱️ Empate ${ga} × ${gd}. PRORROGAÇÃO!</b>`);for(const m of [105,115,120]){await new Promise(r=>setTimeout(r,700));const pa=goalProbV4(a,d,m)+.025,pd=goalProbV4(d,a,m)+.025,r=Math.random();if(r<pa){ga++;goalMoney+=2;const s=registerGoalV4(a,d.country);write(`⚽ <b>Gol na prorrogação!</b> ${s?.name||"Atacante"} — ${a.country} ${m}'`)}else if(r<pa+pd){gd++;const s=registerGoalV4(d,a.country);write(`⚽ <b>Gol na prorrogação!</b> ${s?.name||"Atacante"} — ${d.country} ${m}'`)}else write(`${m}' — tensão máxima.`);if(ga!==gd&&m===120)break}}
- let winner;if(ga===gd){write("🥅 <b>DISPUTA DE PÊNALTIS!</b>");let pa=0,pd=0;for(let i=1;i<=5;i++){await new Promise(r=>setTimeout(r,430));if(Math.random()<.76)pa++;if(Math.random()<.76)pd++;write(`⚽ Pênalti ${i}: ${a.country} ${pa} × ${pd} ${d.country}`)}while(pa===pd){await new Promise(r=>setTimeout(r,430));if(Math.random()<.76)pa++;if(Math.random()<.76)pd++;write(`⚽ Morte súbita: ${a.country} ${pa} × ${pd} ${d.country}`)}winner=pa>pd?a:d}else winner=ga>gd?a:d;
+ let winner;if(ga===gd){
+  write("🥅 <b>DISPUTA DE PÊNALTIS!</b>");
+  const shootout={a:0,d:0};
+  const shooterFor=(team,k)=>{const list=eligiblePlayers(team).filter(x=>x.nativePos!=="G").sort((x,y)=>y.ovr-x.ovr);return list[k%list.length]||eligiblePlayers(team)[0]};
+  const takePenalty=async(team,side,k,label)=>{
+    const shooter=shooterFor(team,k-1);if(!shooter)return;
+    write(`🎯 <b>${shooter.name}</b> é ${label}.`);await new Promise(r=>setTimeout(r,620));
+    write("Ele ajeita a bola...");await new Promise(r=>setTimeout(r,620));write("Ele chuta...");await new Promise(r=>setTimeout(r,620));
+    const chance=Math.max(.58,Math.min(.91,.66+((shooter.ovr||75)-75)/100));
+    const roll=Math.random();
+    if(roll<chance){shootout[side]++;write(`⚽ <b>Gol!</b> ${a.country} ${shootout.a} × ${shootout.d} ${d.country}`)}
+    else if(roll<chance+.12)write(`🧤 <b>Defende o goleiro!</b> ${a.country} ${shootout.a} × ${shootout.d} ${d.country}`)
+    else if(roll<chance+.2)write(`🥅 <b>Na trave!</b> ${a.country} ${shootout.a} × ${shootout.d} ${d.country}`)
+    else write(`❌ <b>Pra fora!</b> ${a.country} ${shootout.a} × ${shootout.d} ${d.country}`);
+    await new Promise(r=>setTimeout(r,480));
+  };
+  let roundsPlayed=0;
+  for(let i=1;i<=5;i++){await takePenalty(a,"a",i,`${i}º cobrador de ${a.country}`);await takePenalty(d,"d",i,`${i}º cobrador de ${d.country}`);roundsPlayed=i;if(shootout.a>shootout.d+(5-i)||shootout.d>shootout.a+(5-i)){write("<b>Vitória definida antecipadamente nos pênaltis!</b>");break}}
+  while(shootout.a===shootout.d){roundsPlayed++;await takePenalty(a,"a",roundsPlayed,`cobrador da morte súbita de ${a.country}`);await takePenalty(d,"d",roundsPlayed,`cobrador da morte súbita de ${d.country}`)}
+  winner=shootout.a>shootout.d?a:d;
+ }else winner=ga>gd?a:d;
  if(v4Effect(a,"loseGoal")&&winner===a&&ga>0){ga--;delete STATE.effects[a.id].loseGoal;write("⚠️ Escândalo de Arbitragem: um gol foi anulado.");if(ga<=gd)winner=d}
  write(`<b>🏁 FIM DE JOGO!</b> ${a.country} ${ga} × ${gd} ${d.country}`);await new Promise(r=>setTimeout(r,900));finishMatchV4(a,d,target,winner===a,goalMoney,ga,gd)
 }
@@ -566,11 +604,11 @@ function chooseCardPlayerV4(t){const p=eligiblePlayers(t).filter(x=>x.nativePos!
 function finishMatchV4(a,d,target,won,goalMoney,ga,gd){
  setBattleLock(false);const reward=COUNTRY_REWARD[target]||25;
  if(won){const old=STATE.owner[target];STATE.owner[target]=a.id;if(!a.territories.includes(target))a.territories.push(target);a.money+=reward+goalMoney;addLog(`🏆 ${a.country} conquistou ${target}. +$${reward}M pela conquista +$${goalMoney}M pelos gols.`);
-  const loser=old!==null?STATE.players[old]:null;const pool=loser?loser.roster:v4GetBot(target);if(loser)loser.territories=loser.territories.filter(x=>x!==target);updateLiveMarketV4(target,pool,[]);chooseTwoStealsV4(a,loser,target,pool,reward,goalMoney)
+  const loser=old!==null?STATE.players[old]:null;const pool=loser?loser.roster:v4GetBot(target);if(loser)loser.territories=loser.territories.filter(x=>x!==target);chooseTwoStealsV4(a,loser,target,pool,reward,goalMoney)
  }else{a.money+=goalMoney;addLog(`⚽ ${a.country} recebeu +$${goalMoney}M pelos gols marcados.`);if(d.id>=0&&!v4Effect(a,"extraLife")){const pool=d.roster.filter(x=>!x.injured&&!x.red),x=pool[Math.floor(Math.random()*Math.max(1,pool.length))];if(x)x.injured=1}else if(v4Effect(a,"extraLife"))delete STATE.effects[a.id].extraLife;endRoundV4()}
 }
-function updateLiveMarketV4(country,pool,chosen){const ids=new Set(chosen.map(x=>x.id));(pool||[]).filter(x=>x.ovr>=87&&!ids.has(x.id)&&!x.legend).forEach(x=>{if(!STATE.market.some(m=>m.name===x.name&&!m.sold)){STATE.market.push({id:`live_${x.id}`,name:x.name,ovr:x.ovr,pos:x.nativePos,source:country,sourcePlayerId:x.id,sold:false})}})}
-function chooseTwoStealsV4(winner,loser,target,pool,reward,goalMoney){const candidates=(pool||[]).filter(x=>!x.injured&&!x.red);document.getElementById("modalContent").innerHTML=`<h2>🏆 ${target} CONQUISTADO!</h2><p>Você ganhou <b class="money">$${reward+goalMoney}M</b>. Agora escolha exatamente <b>2 jogadores</b>.</p><div class="steal-list">${candidates.map(x=>`<label class="steal-player"><input type="checkbox" value="${x.id}"><b>${x.name}</b><span>${POS[x.nativePos]}</span><strong>${x.ovr}</strong></label>`).join("")}</div><button id="captureBtn" class="primary wide">CAPTURAR 2</button>`;showModal();document.getElementById("captureBtn").onclick=()=>{const ids=[...document.querySelectorAll(".steal-player input:checked")].map(x=>x.value);if(ids.length!==2)return toast("Escolha exatamente 2 jogadores.");const got=candidates.filter(x=>ids.includes(x.id));got.forEach(x=>{if(loser)loser.roster=loser.roster.filter(y=>y.id!==x.id);x.source=winner.country;x.starter=false;x.red=false;x.yellow=0;winner.roster.push(x)});updateLiveMarketV4(target,pool,got);if(loser&&owned(loser).length===0)eliminateV4(loser);document.getElementById("modalContent").innerHTML=`<div class="event-box"><div class="event-title good">👑 CONQUISTA COMPLETA</div><p>${winner.country} controla ${target}.</p><p>${got.map(x=>`⚽ ${x.name} — OVR ${x.ovr}`).join("<br>")}</p></div><button id="cont" class="primary wide">CONTINUAR</button>`;document.getElementById("cont").onclick=endRoundV4}}
+function updateLiveMarketV4(country,pool,chosen){const ids=new Set(chosen.map(x=>x.id));STATE.market=STATE.market.filter(m=>!ids.has(m.sourcePlayerId));(pool||[]).filter(x=>x.ovr>=87&&!ids.has(x.id)&&!x.legend).forEach(x=>{if(!STATE.market.some(m=>m.sourcePlayerId===x.id&&!m.sold)){STATE.market.push({id:`live_${x.id}`,name:x.name,ovr:x.ovr,pos:x.nativePos,source:country,sourcePlayerId:x.id,sold:false})}})}
+function chooseTwoStealsV4(winner,loser,target,pool,reward,goalMoney){const candidates=(pool||[]).filter(x=>!x.injured&&!x.red);document.getElementById("modalContent").innerHTML=`<h2>🏆 ${target} CONQUISTADO!</h2><p>Você ganhou <b class="money">$${reward+goalMoney}M</b>. Agora escolha exatamente <b>2 jogadores</b>.</p><div class="steal-list">${candidates.map(x=>`<label class="steal-player"><input type="checkbox" value="${x.id}"><b>${x.name}</b><span>${POS[x.nativePos]}</span><strong>${x.ovr}</strong></label>`).join("")}</div><button id="captureBtn" class="primary wide">CAPTURAR 2</button>`;showModal();document.getElementById("captureBtn").onclick=()=>{const ids=[...document.querySelectorAll(".steal-player input:checked")].map(x=>x.value);if(ids.length!==2)return toast("Escolha exatamente 2 jogadores.");const got=candidates.filter(x=>ids.includes(x.id));got.forEach(x=>{if(loser)loser.roster=loser.roster.filter(y=>y.id!==x.id);else{const i=pool.findIndex(y=>y.id===x.id);if(i>=0)pool.splice(i,1)}x.source=winner.country;x.starter=false;x.red=false;x.yellow=0;winner.roster.push(x)});updateLiveMarketV4(target,pool,got);if(loser&&owned(loser).length===0)eliminateV4(loser);document.getElementById("modalContent").innerHTML=`<div class="event-box"><div class="event-title good">👑 CONQUISTA COMPLETA</div><p>${winner.country} controla ${target}.</p><p>${got.map(x=>`⚽ ${x.name} — OVR ${x.ovr}`).join("<br>")}</p></div><button id="cont" class="primary wide">CONTINUAR</button>`;document.getElementById("cont").onclick=endRoundV4}}
 function eliminateV4(p){if(p.eliminated)return;p.eliminated=true;addLog(`💀 ${p.name} foi eliminado por ficar sem territórios.`);toast(`${p.name} foi eliminado!`)}
 function endRoundV4(){if(battleLocked)return;closeModal();renderGame();if(checkVictoryV4())return;setTimeout(randomEventV4,350)}
 function checkVictoryV4(){const alive=STATE.players.filter(p=>!p.eliminated);if(STATE.players.length>1&&alive.length===1){victoryV4(alive[0]);return true}const p=current();if(p&&continentCount(p)>=3){victoryV4(p);return true}return false}
@@ -599,7 +637,21 @@ function loadGame(){try{const raw=localStorage.getItem("WWC_SAVE_V4");if(!raw)re
 function tradeMenu(){const p=current(),others=STATE.players.filter(x=>x.id!==p.id&&!x.eliminated);if(!others.length)return toast("Trade exige pelo menos 2 players humanos.");document.getElementById("modalContent").innerHTML=`<h2>🤝 TRADE</h2><label>Player:</label><select id="tradeTargetV4">${others.map(x=>`<option value="${x.id}">${x.name} — ${x.country}</option>`).join("")}</select><div id="tradeBuilderV4"></div>`;showModal();document.getElementById("tradeTargetV4").onchange=renderTradeBuilderV4;renderTradeBuilderV4()}
 function renderTradeBuilderV4(){const p=current(),q=STATE.players[+document.getElementById("tradeTargetV4").value];document.getElementById("tradeBuilderV4").innerHTML=`<div class="trade-grid"><div class="trade-side"><h3>${p.name}</h3><b>Jogadores</b>${p.roster.filter(x=>!x.injured).map(x=>`<label><input type="checkbox" data-give-player-v4="${x.id}"> ${x.name} (${x.ovr})</label>`).join("")}<b>Territórios</b>${owned(p).map(c=>`<label><input type="checkbox" data-give-country-v4="${c}" ${c===p.country?"disabled":""}> ${FLAGS[c]} ${c}</label>`).join("")}<b>Dinheiro (M)</b><input id="giveMoneyV4" class="trade-money" type="number" min="0" step="1" value="0"></div><div class="trade-arrow">⇄</div><div class="trade-side"><h3>${q.name}</h3><b>Jogadores</b>${q.roster.filter(x=>!x.injured).map(x=>`<label><input type="checkbox" data-take-player-v4="${x.id}"> ${x.name} (${x.ovr})</label>`).join("")}<b>Territórios</b>${owned(q).map(c=>`<label><input type="checkbox" data-take-country-v4="${c}" ${c===q.country?"disabled":""}> ${FLAGS[c]} ${c}</label>`).join("")}<b>Dinheiro (M)</b><input id="takeMoneyV4" class="trade-money" type="number" min="0" step="1" value="0"></div></div><button id="proposeTradeV4" class="primary wide">ENVIAR PROPOSTA</button>`;document.getElementById("proposeTradeV4").onclick=proposeTradeV4}
 function proposeTradeV4(){const p=current(),q=STATE.players[+document.getElementById("tradeTargetV4").value],gm=Number(document.getElementById("giveMoneyV4").value)||0,tm=Number(document.getElementById("takeMoneyV4").value)||0;if(!Number.isInteger(gm)||!Number.isInteger(tm)||gm<0||tm<0)return toast("Dinheiro deve ser número inteiro de milhões.");if(gm>p.money||tm>q.money)return toast("Dinheiro insuficiente.");const gp=[...document.querySelectorAll("[data-give-player-v4]:checked")].map(x=>x.dataset.givePlayerV4),tp=[...document.querySelectorAll("[data-take-player-v4]:checked")].map(x=>x.dataset.takePlayerV4),gc=[...document.querySelectorAll("[data-give-country-v4]:checked")].map(x=>x.dataset.giveCountryV4),tc=[...document.querySelectorAll("[data-take-country-v4]:checked")].map(x=>x.dataset.takeCountryV4);STATE.pendingTrade={from:p.id,to:q.id,givePlayers:gp,giveCountries:gc,giveMoney:gm,takePlayers:tp,takeCountries:tc,takeMoney:tm};document.getElementById("modalContent").innerHTML=`<div class="event-box"><div class="event-title warn">⚠️ ${q.name}, confirmar este TRADE?</div><p>${p.country} entrega ${gp.length} jogador(es), ${gc.length} território(s) e $${gm}M.</p><p>${q.country} entrega ${tp.length} jogador(es), ${tc.length} território(s) e $${tm}M.</p><button id="rejectTrade" class="secondary">RECUSAR</button><button id="acceptTrade" class="primary">CONFIRMAR TRADE</button></div>`;document.getElementById("rejectTrade").onclick=()=>{STATE.pendingTrade=null;tradeMenu()};document.getElementById("acceptTrade").onclick=executeTradeV4}
-function executeTradeV4(){const t=STATE.pendingTrade;if(!t)return;const p=STATE.players[t.from],q=STATE.players[t.to];if(t.giveMoney>p.money||t.takeMoney>q.money)return toast("Trade perdeu validade por falta de dinheiro.");t.givePlayers.forEach(id=>{const x=p.roster.find(y=>y.id===id);if(x){p.roster=p.roster.filter(y=>y.id!==id);x.starter=false;x.source=q.country;q.roster.push(x)}});t.takePlayers.forEach(id=>{const x=q.roster.find(y=>y.id===id);if(x){q.roster=q.roster.filter(y=>y.id!==id);x.starter=false;x.source=p.country;p.roster.push(x)}});t.giveCountries.forEach(c=>{STATE.owner[c]=q.id;p.territories=p.territories.filter(x=>x!==c);if(!q.territories.includes(c))q.territories.push(c)});t.takeCountries.forEach(c=>{STATE.owner[c]=p.id;q.territories=q.territories.filter(x=>x!==c);if(!p.territories.includes(c))p.territories.push(c)});p.money=p.money-t.giveMoney+t.takeMoney;q.money=q.money-t.takeMoney+t.giveMoney;STATE.trades.push({...t});STATE.pendingTrade=null;addLog(`🤝 Trade concluído entre ${p.country} e ${q.country}.`);endRoundV4()}
+function executeTradeV4(){
+ const t=STATE.pendingTrade;if(!t)return;const p=STATE.players[t.from],q=STATE.players[t.to];if(!p||!q)return toast("Trade inválido.");
+ const ownsAll=(player,countries)=>countries.every(country=>STATE.owner[country]===player.id&&country!==player.country);
+ const hasAll=(player,players)=>players.every(id=>player.roster.some(x=>x.id===id));
+ if(t.giveMoney>p.money||t.takeMoney>q.money||!hasAll(p,t.givePlayers)||!hasAll(q,t.takePlayers)||!ownsAll(p,t.giveCountries)||!ownsAll(q,t.takeCountries)){
+  STATE.pendingTrade=null;toast("Trade cancelado: uma das ofertas não está mais disponível.");return;
+ }
+ // Toda pré-condição é verificada antes de mudar o estado: executa tudo ou não executa nada.
+ const givePlayers=t.givePlayers.map(id=>p.roster.find(x=>x.id===id)),takePlayers=t.takePlayers.map(id=>q.roster.find(x=>x.id===id));
+ p.roster=p.roster.filter(x=>!t.givePlayers.includes(x.id));q.roster=q.roster.filter(x=>!t.takePlayers.includes(x.id));
+ givePlayers.forEach(x=>{x.starter=false;x.source=q.country;q.roster.push(x)});takePlayers.forEach(x=>{x.starter=false;x.source=p.country;p.roster.push(x)});
+ t.giveCountries.forEach(c=>{STATE.owner[c]=q.id;p.territories=p.territories.filter(x=>x!==c);q.territories.push(c)});
+ t.takeCountries.forEach(c=>{STATE.owner[c]=p.id;q.territories=q.territories.filter(x=>x!==c);p.territories.push(c)});
+ p.money=p.money-t.giveMoney+t.takeMoney;q.money=q.money-t.takeMoney+t.giveMoney;STATE.trades.push({...t});STATE.pendingTrade=null;addLog(`🤝 Trade concluído entre ${p.country} e ${q.country}.`);endRoundV4();
+}
 
 /* Reaplica eventos originais com efeitos v4 onde necessário. */
 function effectAdd(p,k,v,turns=1){v4AddEffect(p,k,v,turns)}
