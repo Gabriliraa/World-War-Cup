@@ -424,7 +424,7 @@ Object.assign(SEA,{"Espanha":["Marrocos","Brasil","México","Estados Unidos","Po
 const FORMATIONS_V4={
   "433":{G:1,DEF:4,MID:3,ATT:3,label:"4-3-3 • Média"},
   "442":{G:1,DEF:4,MID:4,ATT:2,label:"4-4-2 • Defesa"},
-  "353":{G:1,DEF:3,MID:5,ATT:3,label:"3-5-3 • Ataque"},
+  "352":{G:1,DEF:3,MID:5,ATT:2,label:"3-5-2 • Ataque"},
   "CUSTOM":{label:"Tática Personalizada"}
 };
 const ALLOWED_V4={G:["G"],DEF:["DEF","MID"],MID:["MID","ATT"],ATT:["ATT","MID"]};
@@ -485,7 +485,26 @@ function v4AutoSub(p,write){
     sub.starter=true;active.push(sub);if(write)write(`🔄 <b>Substituição automática:</b> ${sub.name} entrou — OVR ${sub.ovr}.`);
   }
 }
-function v4FormationValid(p){const c=v4Counts(p);if(p.formation==="CUSTOM")return c.G===1&&c.G+c.DEF+c.MID+c.ATT===11;const f=FORMATIONS_V4[p.formation];return !!f&&c.G===f.G&&c.DEF===f.DEF&&c.MID===f.MID&&c.ATT===f.ATT}
+function v4FormationValid(p){
+  const c=v4Counts(p);
+  const total=c.G+c.DEF+c.MID+c.ATT;
+
+  // Nunca permitir mais de 11 jogadores em campo
+  if(total>11)return false;
+
+  if(p.formation==="CUSTOM"){
+    return c.G===1&&total===11;
+  }
+
+  const f=FORMATIONS_V4[p.formation];
+  if(!f)return false;
+
+  return total===11&&
+    c.G===f.G&&
+    c.DEF===f.DEF&&
+    c.MID===f.MID&&
+    c.ATT===f.ATT;
+}
 function v4ApplyFormation(p,form,custom){
   const target=form==="CUSTOM"?custom:FORMATIONS_V4[form];if(!target)return false;
   const required=Object.entries(target).filter(([pos])=>["G","DEF","MID","ATT"].includes(pos));
