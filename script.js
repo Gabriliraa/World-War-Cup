@@ -443,9 +443,9 @@ const POSITION_V4={
 const TEAM_BASE_V4={"Espanha":85,"Argentina":85,"França":86,"Inglaterra":85,"Brasil":86,"Marrocos":80,"Portugal":84,"Bélgica":81,"Países Baixos":83,"México":77,"Colômbia":81,"Alemanha":84,"Croácia":80,"Suíça":78,"Itália":83,"Uruguai":81,"Estados Unidos":77,"Japão":78,"Noruega":79,"Senegal":78,"Coreia do Sul":78,"Equador":76,"Áustria":78,"Egito":74,"Irã":73,"Austrália":74,"Turquia":78,"Argélia":75,"Escócia":75,"Tunísia":72};
 const MARKET_V4=[
   ["Zlatan Ibrahimović",93,"ATT"],["Ronaldinho",95,"MID"],["Ronaldo Nazário",97,"ATT"],["Romário",94,"ATT"],["Johan Cruyff",96,"ATT"],
-  ["Franz Beckenbauer",96,"DEF"],["Paolo Maldini",95,"DEF"],["Gianluigi Buffon",94,"G"],["Iker Casillas",93,"G"],["Xavi",94,"MID"],
+  ["Franz Beckenbauer",96,"DEF"],["Paolo Maldini",95,"DEF"],["Gianluigi Buffon",94,"G"],["Lira",99,"G"],["Xavi",94,"MID"],
   ["Andrés Iniesta",95,"MID"],["Thierry Henry",95,"ATT"],["Zinedine Zidane",97,"MID"],["Kaká",94,"MID"],["Roberto Carlos",94,"DEF"],
-  ["Cafu",93,"DEF"],["George Best",94,"ATT"],["Gerd Müller",95,"ATT"],["Lev Yashin",97,"G"],["Eusébio",96,"ATT"]
+  ["Cafu",93,"DEF"],["George Best",94,"ATT"],["Gerd Müller",95,"ATT"],["Lev Yashin",97,"G"],["Eusébio",96,"ATT"]["Matheuzinho",99,"DEF"]
 ].map((x,i)=>({id:"mkt_"+i,name:x[0],ovr:x[1],pos:x[2],sold:false,source:"Mercado"}));
 const LEGENDS_V4={"Brasil":["Pelé",99,"ATT"],"Argentina":["Diego Maradona",98,"MID"],"França":["Zinedine Zidane",97,"MID"],"Espanha":["Xavi",94,"MID"],"Inglaterra":["George Best",94,"ATT"],"Portugal":["Eusébio",96,"ATT"],"Itália":["Paolo Maldini",95,"DEF"],"Alemanha":["Franz Beckenbauer",96,"DEF"],"Países Baixos":["Johan Cruyff",96,"ATT"],"Uruguai":["Luis Suárez",94,"ATT"],"Noruega":["Erling Haaland",94,"ATT"],"Colômbia":["Carlos Valderrama",92,"MID"],"Croácia":["Davor Šuker",91,"ATT"],"México":["Hugo Sánchez",94,"ATT"],"Marrocos":["Ahmed Faras",89,"ATT"]};
 
@@ -527,7 +527,9 @@ function v4ApplyFormation(p,form,custom){
 }
 function v4EnsureTactic(p,write){
   if(v4FormationValid(p))return true;
-  if(p.formation==="CUSTOM")return false;
+
+  // Recalcula a escalação ignorando jogadores lesionados/suspensos
+  // e coloca outro jogador elegível no lugar.
   return v4ApplyFormation(p,p.formation,p.customFormation);
 }
 function v4Strength(p,side="normal"){
@@ -535,7 +537,7 @@ function v4Strength(p,side="normal"){
   let v=a.reduce((s,x)=>s+x.ovr,0)/Math.max(1,a.length);v+=v4Effect(p,"overall");v+=v4Effect(p,"permanent");
   if(side==="attack")v+=v4Effect(p,"attack");if(side==="defense")v+=v4Effect(p,"defense");
   if(c.G<1)v-=18;if(c.DEF>=5)v+=2;if(c.DEF<=2)v-=5;if(c.ATT>=4)v+=2;if(c.MID>=4)v+=1;
-  if(p.formation==="442")v+=1;if(p.formation==="353")v+=2;return Math.round(v);
+  if(p.formation==="442")v+=1;if(p.formation==="352")v+=2;return Math.round(v);
 }
 
 /* Estado inicial atualizado e modo solo sem eliminação automática. */
@@ -577,7 +579,7 @@ function baseOVR(c){return TEAM_BASE_V4[c]||75}
 function prepareAttack(target){const p=current(),o=STATE.owner[target],d=o===null?{id:-1,name:"BOT",country:target,roster:v4GetBot(target),formation:"433",defeatedBy:[]}:STATE.players[o];document.getElementById("modalContent").innerHTML=`<h2>⚔ ${p.country} × ${d.country}</h2><div class="event-box"><p><b>ATACANTE</b></p><h2>${p.country}</h2><p>OVR: <b>${v4Strength(p,"attack")}</b> • ${FORMATIONS_V4[p.formation]?.label||p.formation}</p><p><b>DEFENSOR</b></p><h2>${d.country}</h2><p>OVR: <b>${o===null?v4Strength(d):v4Strength(d,"defense")}</b></p><p class="muted">⚠️ Depois de começar, o X não cancela a partida.</p></div><button id="beginBattle" class="primary wide">⚽ COMEÇAR PARTIDA</button>`;showModal();document.getElementById("beginBattle").onclick=()=>simulateMatchV4(target)}
 function weightedScorerV4(t,opponentCountry){let a=eligiblePlayers(t).filter(x=>x.nativePos!=="G");if(!a.length)return null;const bestSuppressed=v4Effect(t,"cancelBest")>0&&t===current();const max=Math.max(...a.map(x=>x.ovr));const weights=a.map(x=>{let w=x.pos==="ATT"?3.5:x.pos==="MID"?2.1:.25;w*=Math.max(.2,x.ovr/80);if(x.ovr===max&&bestSuppressed)w*=.05;if(opponentCountry&&x.source===opponentCountry)w*=1+v4Effect(t,"exBoost")/100;return w});let total=weights.reduce((s,x)=>s+x,0),r=Math.random()*total;for(let i=0;i<a.length;i++){r-=weights[i];if(r<=0)return a[i]}return a[a.length-1]}
 function registerGoalV4(p,opponent){const x=weightedScorerV4(p,opponent);if(!x)return null;STATE.scorers[x.name]=(STATE.scorers[x.name]||0)+1;x.goals=(x.goals||0)+1;return x}
-function goalProbV4(att,def,m){const ac=v4Counts(att),dc=v4Counts(def);let chance=.025+ac.ATT*.027+ac.MID*.012+((effectiveStrengthForV4(att,"attack")-effectiveStrengthForV4(def,"defense"))/900);chance+=v4Effect(att,"goalChance");chance-=v4Effect(def,"saveBoost");if(ac.ATT<2)chance-=.018;if(ac.MID<2)chance-=.01;if(dc.DEF>=5)chance-=.035;if(dc.DEF>=6)chance-=.015;if(dc.G<1)chance+=.12;if(m>=76)chance+=v4Effect(att,"lateBoost")/100;if(att.formation==="353")chance+=.008;if(att.formation==="442")chance-=.004;return Math.max(.008,Math.min(.20,chance))}
+function goalProbV4(att,def,m){const ac=v4Counts(att),dc=v4Counts(def);let chance=.025+ac.ATT*.027+ac.MID*.012+((effectiveStrengthForV4(att,"attack")-effectiveStrengthForV4(def,"defense"))/900);chance+=v4Effect(att,"goalChance");chance-=v4Effect(def,"saveBoost");if(ac.ATT<2)chance-=.018;if(ac.MID<2)chance-=.01;if(dc.DEF>=5)chance-=.035;if(dc.DEF>=6)chance-=.015;if(dc.G<1)chance+=.12;if(m>=76)chance+=v4Effect(att,"lateBoost")/100;if(att.formation==="352")chance+=.008;if(att.formation==="442")chance-=.004;return Math.max(.008,Math.min(.20,chance))}
 function effectiveStrengthForV4(p,side){return v4Strength(p,side)}
 function setBattleLock(v){battleLocked=v;document.getElementById("modal").classList.toggle("battle-locked",v)}
 async function simulateMatchV4(target){
@@ -645,7 +647,7 @@ function manageTeam(){
  const p=current();if(v4Effect(p,"noSubs"))return toast("Escalação bloqueada nesta rodada.");const c=v4Counts(p);
  const row=(x,type)=>{const bg=x.legend?"background:rgba(255,190,0,.34)":x.ovr>=90?"background:rgba(230,57,70,.30)":"";return `<tr class="${x.injured||x.red?"injured":""}" style="${bg}"><td><input type="radio" name="${type}" data-sub-${type}="${x.id}" ${x.injured||x.red?"disabled":""}></td><td><b>${x.name}</b>${x.legend?" ⭐":""}</td><td>${POS[x.nativePos]}</td><td>${POS[x.pos]}</td><td><b>${x.ovr}</b></td><td>${x.injured?"🩹 Lesionado":x.red?"🟥 Expulso":type==="out"?"Em campo":"Disponível"}</td></tr>`};
  const benchGroups=["ATT","MID","DEF","G"].map(pos=>{const players=p.roster.filter(x=>!x.starter&&x.nativePos===pos);return `<h4 class="position-title">${POS[pos]}S</h4><table class="stats-table"><thead><tr><th>ENTRAR</th><th>Jogador</th><th>Posição</th><th>Função</th><th>OVR</th><th>Status</th></tr></thead><tbody>${players.map(x=>row(x,"in")).join("")||"<tr><td colspan='6'>Nenhum jogador nesta posição.</td></tr>"}</tbody></table>`}).join("");
- document.getElementById("modalContent").innerHTML=`<h2>👥 ${p.country} — Gerenciamento do elenco</h2><p class="muted">Selecione um titular para sair e um reserva para entrar. A substituição preserva a posição tática e impede escalações inválidas.</p><div class="formations">${["442","433","353","CUSTOM"].map(f=>`<button class="formation ${p.formation===f?"active":""}" data-form="${f}">${FORMATIONS_V4[f].label}</button>`).join("")}</div><div id="customFormation"></div><div class="rosters"><div class="roster-box"><h3>TITULARES — selecione quem sai</h3><table class="stats-table"><thead><tr><th>SAIR</th><th>Jogador</th><th>Posição</th><th>Função</th><th>OVR</th><th>Status</th></tr></thead><tbody>${p.roster.filter(x=>x.starter).map(x=>row(x,"out")).join("")}</tbody></table></div><div class="roster-box"><h3>BANCO — selecione quem entra</h3>${benchGroups}<button id="confirmSubV4" class="primary wide">🔄 FAZER SUBSTITUIÇÃO</button></div></div>`;
+ document.getElementById("modalContent").innerHTML=`<h2>👥 ${p.country} — Gerenciamento do elenco</h2><p class="muted">Selecione um titular para sair e um reserva para entrar. A substituição preserva a posição tática e impede escalações inválidas.</p><div class="formations">${["442","433","352","CUSTOM"].map(f=>`<button class="formation ${p.formation===f?"active":""}" data-form="${f}">${FORMATIONS_V4[f].label}</button>`).join("")}</div><div id="customFormation"></div><div class="rosters"><div class="roster-box"><h3>TITULARES — selecione quem sai</h3><table class="stats-table"><thead><tr><th>SAIR</th><th>Jogador</th><th>Posição</th><th>Função</th><th>OVR</th><th>Status</th></tr></thead><tbody>${p.roster.filter(x=>x.starter).map(x=>row(x,"out")).join("")}</tbody></table></div><div class="roster-box"><h3>BANCO — selecione quem entra</h3>${benchGroups}<button id="confirmSubV4" class="primary wide">🔄 FAZER SUBSTITUIÇÃO</button></div></div>`;
  showModal();document.getElementById("confirmSubV4").onclick=applySubstitutionV4;document.querySelectorAll("[data-form]").forEach(b=>b.onclick=()=>chooseFormationV4(p,b.dataset.form));if(p.formation==="CUSTOM")customFormationUI(p);
 }
 function chooseFormationV4(p,f){if(f!=="CUSTOM"){const ok=v4ApplyFormation(p,f);if(!ok){toast("Seu elenco não tem jogadores aptos para montar essa formação.");return}}else p.formation="CUSTOM";manageTeam()}
