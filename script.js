@@ -445,7 +445,7 @@ const MARKET_V4=[
   ["Zlatan Ibrahimović",93,"ATT"],["Ronaldinho",95,"MID"],["Ronaldo Nazário",97,"ATT"],["Romário",94,"ATT"],["Johan Cruyff",96,"ATT"],
   ["Franz Beckenbauer",96,"DEF"],["Paolo Maldini",95,"DEF"],["Gianluigi Buffon",94,"G"],["Lira",99,"G"],["Xavi",94,"MID"],
   ["Andrés Iniesta",95,"MID"],["Thierry Henry",95,"ATT"],["Zinedine Zidane",97,"MID"],["Kaká",94,"MID"],["Roberto Carlos",94,"DEF"],
-  ["Cafu",93,"DEF"],["George Best",94,"ATT"],["Gerd Müller",95,"ATT"],["Lev Yashin",97,"G"],["Eusébio",96,"ATT"]["Matheuzinho",99,"DEF"]
+  ["Cafu",93,"DEF"],["George Best",94,"ATT"],["Gerd Müller",95,"ATT"],["Lev Yashin",97,"G"],["Eusébio",96,"ATT"],["Matheuzinho",99,"DEF"]
 ].map((x,i)=>({id:"mkt_"+i,name:x[0],ovr:x[1],pos:x[2],sold:false,source:"Mercado"}));
 const LEGENDS_V4={"Brasil":["Pelé",99,"ATT"],"Argentina":["Diego Maradona",98,"MID"],"França":["Zinedine Zidane",97,"MID"],"Espanha":["Xavi",94,"MID"],"Inglaterra":["George Best",94,"ATT"],"Portugal":["Eusébio",96,"ATT"],"Itália":["Paolo Maldini",95,"DEF"],"Alemanha":["Franz Beckenbauer",96,"DEF"],"Países Baixos":["Johan Cruyff",96,"ATT"],"Uruguai":["Luis Suárez",94,"ATT"],"Noruega":["Erling Haaland",94,"ATT"],"Colômbia":["Carlos Valderrama",92,"MID"],"Croácia":["Davor Šuker",91,"ATT"],"México":["Hugo Sánchez",94,"ATT"],"Marrocos":["Ahmed Faras",89,"ATT"]};
 
@@ -545,12 +545,75 @@ function v4Strength(p,side="normal"){
 
 /* Estado inicial atualizado e modo solo sem eliminação automática. */
 function startGame(){
-  const selects=[...document.querySelectorAll(".trainer-country")],names=[...document.querySelectorAll(".trainer-name")];
-  if(new Set(selects.map(x=>x.value)).size!==selects.length){toast("Escolha países diferentes.");return}
-  battleLocked=false;STATE={version:4,players:[],current:0,turn:1,owner:{},effects:{},log:[],zoom:1,panX:0,panY:0,scorers:{},lastEvent:null,botRosters:{},legendEventUsed:false,market:MARKET_V4.map(x=>({...x})),marketSeen:{},trades:[],pendingTrade:null,roundGoalMoney:0};
-  NAMES.forEach(c=>STATE.owner[c]=null);
-  selects.forEach((s,i)=>{const p={id:i,name:names[i].value.trim()||`Jogador ${i+1}`,country:s.value,roster:v4CreateRoster(s.value),territories:[s.value],eliminated:false,defeatedBy:[],money:60,formation:"CUSTOM",customFormation:{G:1,DEF:3,MID:3,ATT:4}};STATE.players.push(p);STATE.owner[p.country]=p.id});
-  addLog("🏁 World War Cup começou.");showScreen("game");renderGame();
+  const selects=[...document.querySelectorAll(".trainer-country")];
+  const names=[...document.querySelectorAll(".trainer-name")];
+
+  if(!selects.length){
+    toast("Nenhum jogador foi configurado.");
+    return;
+  }
+
+  if(new Set(selects.map(x=>x.value)).size!==selects.length){
+    toast("Escolha países diferentes.");
+    return;
+  }
+
+  battleLocked=false;
+
+  STATE={
+    version:4,
+    players:[],
+    current:0,
+    turn:1,
+    owner:{},
+    effects:{},
+    log:[],
+    zoom:1,
+    panX:0,
+    panY:0,
+    scorers:{},
+    lastEvent:null,
+    botRosters:{},
+    legendEventUsed:false,
+    market:Array.isArray(MARKET_V4)?MARKET_V4.map(x=>({...x})):[],
+    marketSeen:{},
+    trades:[],
+    pendingTrade:null,
+    roundGoalMoney:0
+  };
+
+  NAMES.forEach(c=>{
+    STATE.owner[c]=null;
+  });
+
+  selects.forEach((s,i)=>{
+    const roster=v4CreateRoster(s.value);
+
+    const p={
+      id:i,
+      name:names[i]?.value.trim()||`Jogador ${i+1}`,
+      country:s.value,
+      roster:roster,
+      territories:[s.value],
+      eliminated:false,
+      defeatedBy:[],
+      money:60,
+      formation:"CUSTOM",
+      customFormation:{
+        G:1,
+        DEF:3,
+        MID:3,
+        ATT:4
+      }
+    };
+
+    STATE.players.push(p);
+    STATE.owner[p.country]=p.id;
+  });
+
+  addLog("🏁 World War Cup começou.");
+  showScreen("game");
+  renderGame();
 }
 function current(){return STATE.players[STATE.current]}
 function owned(p){return NAMES.filter(c=>STATE.owner[c]===p.id)}
