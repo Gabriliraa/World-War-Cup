@@ -528,8 +528,11 @@ function v4ApplyFormation(p,form,custom){
 function v4EnsureTactic(p,write){
   if(v4FormationValid(p))return true;
 
-  // Recalcula a escalação ignorando jogadores lesionados/suspensos
-  // e coloca outro jogador elegível no lugar.
+  if(p.formation==="CUSTOM"){
+    if(!p.customFormation)return false;
+    return v4ApplyFormation(p,"CUSTOM",p.customFormation);
+  }
+
   return v4ApplyFormation(p,p.formation,p.customFormation);
 }
 function v4Strength(p,side="normal"){
